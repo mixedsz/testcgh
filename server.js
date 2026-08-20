@@ -28,7 +28,12 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- In-memory room registry ---------------------------------------------
-// rooms: Map<roomId, { sockets: Set<ws>, lastActivity: number, fileIds: Set<string> }>
+// rooms: Map<roomId, { sockets: Set<ws>, lastActivity: number, fileIds: Set<string>, ownerToken: string|null }>
+//
+// ownerToken is a random secret the CREATOR's browser generates and keeps to
+// itself (sessionStorage) — it is never part of the shared link, so a joiner
+// can never obtain it. Whoever's WebSocket connection first presents a valid
+// owner token claims the room; only that token can authorize deletion.
 const rooms = new Map();
 
 function touchRoom(roomId) {
@@ -39,7 +44,7 @@ function touchRoom(roomId) {
 function getOrCreateRoom(roomId) {
   let room = rooms.get(roomId);
   if (!room) {
-    room = { sockets: new Set(), lastActivity: Date.now(), fileIds: new Set() };
+    room = { sockets: new Set(), lastActivity: Date.now(), fileIds: new Set(), ownerToken: null };
     rooms.set(roomId, room);
   }
   return room;
@@ -125,6 +130,13 @@ wss.on('connection', (ws, req) => {
   room.sockets.add(ws);
   touchRoom(roomId);
 
+  // If this connection presents an owner token and nobody has claimed
+  // ownership of the room yet, it becomes the (only) party who can delete.
+  const claimedOwnerToken = url.searchParams.get('owner');
+  if (claimedOwnerToken && !room.ownerToken) {
+    room.ownerToken = claimedOwnerToken;
+  }
+
   // Tell everyone currently in the room how many participants there are
   broadcastPresence(roomId);
 
@@ -139,7 +151,11 @@ wss.on('connection', (ws, req) => {
     touchRoom(roomId);
 
     if (msg.type === 'delete-room') {
-      // Only relay this signal; the sender already wiped their own local UI.
+      const authorized = room.ownerToken && msg.token === room.ownerToken;
+      if (!authorized) {
+        try { ws.send(JSON.stringify({ type: 'delete-denied' })); } catch (_) {}
+        return;
+      }
       destroyRoom(roomId, true);
       return;
     }
@@ -179,7 +195,12 @@ function broadcastPresence(roomId) {
 
 // Explicit REST endpoint too, in case a client's socket is already gone
 // when they hit "delete" (e.g. they background the tab right after).
+app.use(express.json());
 app.post('/api/rooms/:roomId/delete', (req, res) => {
+  const room = rooms.get(req.params.roomId);
+  if (!room) return res.status(404).json({ error: 'room not found' });
+  const authorized = room.ownerToken && req.body && req.body.token === room.ownerToken;
+  if (!authorized) return res.status(403).json({ error: 'not authorized' });
   destroyRoom(req.params.roomId, true);
   res.json({ ok: true });
 });

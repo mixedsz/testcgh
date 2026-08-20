@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Enclave Chat — Encrypted Ephemeral Chat</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Screen 1: share the link -->
+<div id="share-screen">
+  <div class="card">
+    <h1>🔒 Encrypted chat ready</h1>
+    <p>Send this link to the person you want to chat with. The encryption key is baked into the link itself and never touches the server — only you two can read anything sent here.</p>
+    <div class="link-row">
+      <input id="share-link" type="text" readonly>
+      <button id="copy-btn" class="btn-secondary">Copy Link</button>
+    </div>
+    <button id="enter-btn" class="btn-primary">Enter Chat</button>
+    <p style="margin-top:16px;font-size:12px;">Nothing is saved once you delete the chat — messages aren't stored anywhere, not even here.</p>
+  </div>
+</div>
+
+<!-- Screen 2: the chat itself -->
+<div id="chat-screen" class="hidden">
+  <header>
+    <strong>🔒 Enclave Chat</strong>
+    <span id="status-pill" class="pill">Connecting…</span>
+    <button id="delete-btn" class="btn-danger" title="Delete chat for everyone">Delete</button>
+  </header>
+
+  <div id="messages"></div>
+
+  <div class="composer">
+    <button id="attach-btn" class="icon-btn" title="Attach image or video">📎</button>
+    <input id="file-input" type="file" accept="image/*,video/*" class="hidden">
+    <textarea id="text-input" rows="1" placeholder="Type a message…"></textarea>
+    <button id="send-btn" class="btn-primary">Send</button>
+  </div>
+</div>
+
+<!-- Delete confirmation -->
+<div id="confirm-overlay" class="overlay hidden">
+  <div class="overlay-card">
+    <h3>Delete this chat?</h3>
+    <p>This permanently deletes the conversation and all shared files for both of you. This can't be undone.</p>
+    <div class="row">
+      <button id="cancel-delete-btn" class="btn-secondary">Cancel</button>
+      <button id="confirm-delete-btn" class="btn-danger">Delete for everyone</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shown once the room has been deleted -->
+<div id="deleted-overlay" class="overlay hidden">
+  <div class="overlay-card">
+    <h3>🗑️ Chat deleted</h3>
+    <p>This conversation and all attachments have been permanently deleted from the server.</p>
+  </div>
+</div>
+
+<script src="crypto.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

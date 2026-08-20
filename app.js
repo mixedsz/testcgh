@@ -19,7 +19,8 @@
   const deletedOverlay = $('#deleted-overlay');
 
   let roomId, key, ws;
-  let isCreator = false;
+  let isOwner = false;
+  let ownerToken = null;
 
   function setStatus(text, cls) {
     statusPill.textContent = text;
@@ -38,18 +39,33 @@
     const parsed = parseHash();
     if (!parsed) {
       // Creator flow: generate a new room + key, show shareable link.
-      isCreator = true;
       roomId = EnclaveCrypto.randomId();
       key = await EnclaveCrypto.generateKey();
       const keyB64 = await EnclaveCrypto.exportKey(key);
       const link = `${location.origin}${location.pathname}#${roomId}.${keyB64}`;
       shareLinkInput.value = link;
       history.replaceState(null, '', `#${roomId}.${keyB64}`);
+
+      // Generate a private owner token. This NEVER goes in the shared link —
+      // it only ever lives in this browser's sessionStorage, so only the
+      // person who created the room can ever delete it.
+      isOwner = true;
+      ownerToken = EnclaveCrypto.randomId();
+      sessionStorage.setItem(`enclave-owner-${roomId}`, ownerToken);
+
       shareScreen.classList.remove('hidden');
       chatScreen.classList.add('hidden');
     } else {
       roomId = parsed.rid;
       key = await EnclaveCrypto.importKey(parsed.keyB64);
+
+      // If this same browser was the one that created this room earlier
+      // (e.g. you're opening your own link again), recognize it as owner.
+      const stored = sessionStorage.getItem(`enclave-owner-${roomId}`);
+      if (stored) {
+        isOwner = true;
+        ownerToken = stored;
+      }
       enterChat();
     }
   }
@@ -65,12 +81,16 @@
   function enterChat() {
     shareScreen.classList.add('hidden');
     chatScreen.classList.remove('hidden');
+    if (isOwner) deleteBtn.classList.remove('hidden');
+    else deleteBtn.classList.add('hidden');
     connect();
   }
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws?room=${encodeURIComponent(roomId)}`);
+    let wsUrl = `${proto}://${location.host}/ws?room=${encodeURIComponent(roomId)}`;
+    if (isOwner && ownerToken) wsUrl += `&owner=${encodeURIComponent(ownerToken)}`;
+    ws = new WebSocket(wsUrl);
 
     ws.onopen = () => setStatus('Waiting for the other person…', 'waiting');
 
@@ -88,6 +108,10 @@
       }
       if (msg.type === 'room-deleted') {
         showDeleted();
+        return;
+      }
+      if (msg.type === 'delete-denied') {
+        alert("Only the person who created this chat link can delete it.");
         return;
       }
       if (msg.type === 'cipher') {
@@ -210,12 +234,17 @@
   cancelDeleteBtn.addEventListener('click', () => confirmOverlay.classList.add('hidden'));
 
   confirmDeleteBtn.addEventListener('click', async () => {
+    if (!isOwner) return; // defensive — button is hidden for non-owners anyway
     confirmOverlay.classList.add('hidden');
     try {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'delete-room' }));
+        ws.send(JSON.stringify({ type: 'delete-room', token: ownerToken }));
       } else {
-        await fetch(`/api/rooms/${roomId}/delete`, { method: 'POST' });
+        await fetch(`/api/rooms/${roomId}/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: ownerToken })
+        });
       }
     } catch (_) {}
     showDeleted();
